@@ -44,7 +44,7 @@ try:
     ok(pg.locator('#af').is_visible(),'formular sursă nouă')
     pg.select_option('#af select[name=tip]','nat'); pg.wait_for_timeout(100)
     ok(not pg.locator('#af [data-h]').is_visible() and pg.locator('#af [data-s]').is_visible(),'racord ascuns / acces vizibil la sursă naturală')
-    pg.fill('#af input[name=adresa]','Mal Bega, test'); pg.select_option('#af select[name=acces]','da'); pg.select_option('#af select[name=stare]','functional')
+    pg.click('#af [data-man]'); pg.fill('#af input[name=strada]','Mal Bega, test'); pg.select_option('#af select[name=acces]','da'); pg.select_option('#af select[name=stare]','functional')
     pg.screenshot(path=OUT+'/03-form.png')
     pg.click('#af button[type=submit]'); pg.wait_for_timeout(800)
     n1=pg.evaluate('HydroTM.getData().surse.length'); ok(n1==n0+1,'sursă adăugată')

@@ -304,10 +304,10 @@ map.on('zoomend',upd);upd();
 const sheet=document.getElementById("sheet");A.sheet=sheet;
 function photoBox(h){
   const p=h.poze||[];
-  if(!p.length)return '<div class="obs" style="color:var(--muted)">Fără poză</div>';
-  if(DATA.demo)return `<div class="photo" aria-label="Poză exemplu"><svg viewBox="0 0 400 300"><rect width="400" height="300" fill="#9aa3ab"/><rect y="190" width="400" height="110" fill="#6f777e"/><rect x="0" y="200" width="400" height="8" fill="#c9ced2"/><g transform="translate(170 85)"><rect x="12" y="0" width="36" height="14" rx="4" fill="#c4161c"/><rect x="6" y="14" width="48" height="12" fill="#a51217"/><rect x="14" y="26" width="32" height="90" fill="#c4161c"/><rect x="-6" y="44" width="20" height="18" rx="3" fill="#a51217"/><rect x="46" y="44" width="20" height="18" rx="3" fill="#a51217"/><rect x="6" y="114" width="48" height="10" fill="#7d0e12"/></g><text x="200" y="285" text-anchor="middle" font-size="15" fill="#fff" font-family="system-ui">Poză exemplu</text></svg></div>`;
-  return p.map(f=>`<div class="photo"><img src="poze/${encodeURIComponent(f)}" alt="Poză ${esc(h.id)}" loading="lazy" onerror="this.parentNode.textContent='Poza nu e disponibilă'"></div>`).join('');
+  if(!p.length)return '';
+  return p.map(f=>DATA.demo&&f==='exemplu.jpg'?DEMO_PH:`<div class="photo"><img src="${esc(A.photoUrl?A.photoUrl(f):'poze/'+encodeURIComponent(f))}" alt="Poză ${esc(h.id)}" loading="lazy" onerror="this.parentNode.textContent='Poza nu e disponibilă'"></div>`).join('');
 }
+const DEMO_PH=`<div class="photo" aria-label="Poză exemplu"><svg viewBox="0 0 400 300"><rect width="400" height="300" fill="#9aa3ab"/><rect y="190" width="400" height="110" fill="#6f777e"/><rect x="0" y="200" width="400" height="8" fill="#c9ced2"/><g transform="translate(170 85)"><rect x="12" y="0" width="36" height="14" rx="4" fill="#c4161c"/><rect x="6" y="14" width="48" height="12" fill="#a51217"/><rect x="14" y="26" width="32" height="90" fill="#c4161c"/><rect x="-6" y="44" width="20" height="18" rx="3" fill="#a51217"/><rect x="46" y="44" width="20" height="18" rx="3" fill="#a51217"/><rect x="6" y="114" width="48" height="10" fill="#7d0e12"/></g><text x="200" y="285" text-anchor="middle" font-size="15" fill="#fff" font-family="system-ui">Poză exemplu</text></svg></div>`;
 function openSheet(h){
   const prev=selected;selected=h;if(prev)refreshPin(prev);refreshPin(h);
   const ll=h.lat.toFixed(6)+','+h.lng.toFixed(6);
@@ -365,7 +365,14 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(A.onEsc&&A.onEsc
 // ---------- căutare ----------
 const q=document.getElementById('q'),res=document.getElementById('res'),clr=document.getElementById('clr');
 const hideRes=()=>{res.style.display='none'};
-let STR_IDX=[];
+let STR_IDX=[],STR_LOC=[];
+A.streets=()=>STR_IDX;A.streetLocs=()=>STR_LOC;
+async function loadStreets(d){
+  let list=d.strazi||[],loc=null;
+  try{const r=await fetch('strazi.json',{cache:'no-cache'});if(r.ok){const j=await r.json();if(j&&j.s&&j.s.length){list=j.s;loc=j.localitati;}}}catch(e){}
+  STR_IDX=list.map(([n,l,lat,lng],i)=>({i,n,l,lat,lng,k:norm(n+' '+l),kn:norm(n)}));
+  STR_LOC=loc||[...new Set(STR_IDX.map(s=>s.l))];
+}
 let hlMk=null;
 let hlPt=null;
 function sizeHl(){if(!hlMk||!hlPt)return;const mpp=40075016.686*Math.cos(hlPt[1]*Math.PI/180)/(512*2**map.getZoom());const d=Math.round(2*180/mpp);const r=hlMk.getElement().querySelector('.hlring');r.style.width=r.style.height=d+'px';}
@@ -449,7 +456,7 @@ function startAdmin(){
 let PUB={config:{}};
 A.published=()=>PUB;
 loadData().then(d=>{
-  PUB=d;STR_IDX=(d.strazi||[]).map(([n,l,lat,lng])=>({n,l,lat,lng,k:norm(n+' '+l)}));
+  PUB=d;A.streetsReady=loadStreets(d);
   setData(JSON.parse(JSON.stringify(d)));
   document.getElementById('infoDemo').hidden=!d.demo;
   let adm=false;try{adm=sessionStorage.getItem('hydrotm-admin')==='1'}catch(e){}

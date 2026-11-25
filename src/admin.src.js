@@ -19,6 +19,7 @@ const KV = (() => {
   const tx = async (mode, fn) => { const d = await open(); return new Promise((res, rej) => { const t = d.transaction('kv', mode); const q = fn(t.objectStore('kv')); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); }); };
   return {
     get: async k => { if (!ok) return mem.get(k); try { return await tx('readonly', s => s.get(k)); } catch (e) { ok = false; return mem.get(k); } },
+    del: async k => { mem.delete(k); if (!ok) return; try { await tx('readwrite', s => s.delete(k)); } catch (e) {} },
     set: async (k, v) => { mem.set(k, v); if (!ok) return; try { await tx('readwrite', s => s.put(v, k)); } catch (e) { ok = false; A.errBox('Copia de lucru nu se poate salva pe acest dispozitiv'); } }
   };
 })();
@@ -72,6 +73,16 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 .af .chk input{width:22px;height:22px;margin:0;flex:none}
 .af .ll{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .hint{font-size:13px;color:var(--muted);margin:8px 0 0}
+.sug{margin-top:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;max-height:260px;overflow-y:auto}
+.sug button{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;color:var(--ink);font-size:15px;padding:10px 12px;min-height:48px;cursor:pointer}
+.sug button:last-child{border-bottom:0}.sug button:hover,.sug button:focus{background:var(--soft);outline:none}
+.sug small{display:block;color:var(--muted);font-size:12px}.sug .empty{padding:12px;font-size:14px}
+.near{background:var(--soft);border-radius:10px;padding:8px 10px}.man{color:#9a6b00}
+@media (prefers-color-scheme:dark){.man{color:#f2b705}}
+.thumbs{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.th{position:relative;width:96px;height:72px;border-radius:10px;overflow:hidden;background:var(--soft)}
+.th img{width:100%;height:100%;object-fit:cover}
+.th button{position:absolute;top:4px;right:4px;width:28px;height:28px;border-radius:50%;border:0;background:rgba(0,0,0,.65);color:#fff;font-size:18px;line-height:1;cursor:pointer}
 .lnk{border:0;background:none;color:var(--red);font:inherit;font-weight:700;padding:0;text-decoration:underline;cursor:pointer}
 @media (prefers-color-scheme:dark){.lnk{color:#ff6b6d}}
 .adm-row{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
@@ -157,59 +168,220 @@ function startAdd() {
   beginPick('Atinge harta în locul sursei noi', ll => openForm(null, ll));
 }
 
+// ---------- străzi: căutare, potrivire adresă, cea mai apropiată stradă ----------
+const ABR = { bd: 'bulevardul', 'b-dul': 'bulevardul', bdul: 'bulevardul', blv: 'bulevardul', str: 'strada', cal: 'calea', al: 'aleea', pta: 'piata', 'p-ta': 'piata', pt: 'piata', spl: 'splaiul', intr: 'intrarea', sos: 'soseaua', 'sos.': 'soseaua' };
+const qWords = t => norm(t).split(' ').filter(Boolean).map(w => ABR[w] || w);
+const TYPEW = /^(strada|bulevardul|calea|aleea|piata|splaiul|intrarea|soseaua|drumul|pasajul|fundatura|ulita|podul|piateta)\s+/;
+const core = s => s.kn.replace(TYPEW, '');
+function findStreets(q, loc, lim = 8) {
+  const w = qWords(q); if (!w.length) return [];
+  const L = A.streets().filter(s => w.every(x => s.k.includes(x)));
+  const w0 = w.find(x => !Object.values(ABR).includes(x)) || w[0];
+  return L.map(s => [s, (s.l === loc ? 0 : 2) + (core(s).startsWith(w0) || s.kn.startsWith(w0) ? 0 : 1)])
+    .sort((a, b) => a[1] - b[1] || a[0].n.length - b[0].n.length || a[0].n.localeCompare(b[0].n, 'ro')).slice(0, lim).map(x => x[0]);
+}
+function parseAddr(a, loc) {
+  const t = norm(a); if (!t) return { s: null, nr: '' };
+  const cand = A.streets().filter(s => s.l === loc).sort((x, y) => y.kn.length - x.kn.length);
+  const rest = r => r.trim().replace(/^(nr|numarul)\s*/, '').trim();
+  for (const s of cand) if (t === s.kn || t.startsWith(s.kn + ' ')) return { s, nr: rest(t.slice(s.kn.length)).toUpperCase() };
+  const m = /^(.*?)(?:\s+(?:nr|numarul))?\s+(\d+\s*[a-z]?(?:\s*[-/]\s*\d+[a-z]?)?)$/.exec(t);
+  const st = m ? m[1] : t, nr = m ? m[2].replace(/\s+/g, '').toUpperCase() : '';
+  const w = qWords(st); const f = cand.filter(s => w.every(x => s.k.includes(x)));
+  return f.length === 1 ? { s: f[0], nr } : { s: null, nr };
+}
+A.parseAddr = parseAddr;
+let GEO = null;
+async function loadGeo() {
+  if (GEO !== null) return GEO;
+  GEO = false;
+  try { const r = await fetch('strazi-geo.json', { cache: 'no-cache' }); if (r.ok) GEO = (await r.json()).g; } catch (e) {}
+  return GEO;
+}
+function nearestStreet(ll) {
+  const L = A.streets(); if (!L.length) return null;
+  const kx = Math.cos(ll.lat * Math.PI / 180) * 111320, ky = 110540, px = ll.lng * kx, py = ll.lat * ky;
+  let best = null, bd = Infinity;
+  for (const s of L) {
+    const lines = GEO && GEO[s.i];
+    if (lines && lines.length) {
+      if (Math.abs(s.lat - ll.lat) > 0.06 || Math.abs(s.lng - ll.lng) > 0.08) continue;
+      for (const l of lines) for (let i = 2; i < l.length; i += 2) {
+        const ax = l[i - 2] * kx, ay = l[i - 1] * ky, bx = l[i] * kx, by = l[i + 1] * ky, dx = bx - ax, dy = by - ay, LL = dx * dx + dy * dy;
+        let t = LL ? ((px - ax) * dx + (py - ay) * dy) / LL : 0; t = Math.max(0, Math.min(1, t));
+        const d = Math.hypot(px - ax - t * dx, py - ay - t * dy); if (d < bd) { bd = d; best = s; }
+      }
+    } else { const d = Math.hypot(s.lng * kx - px, s.lat * ky - py); if (d < bd) { bd = d; best = s; } }
+  }
+  return best ? { s: best, d: bd, exact: !!GEO } : null;
+}
+
+// ---------- fotografii ----------
+const FOTO_MAX = 3;
+let FIDX = {}; const FURL = new Map();
+A.photoUrl = n => FURL.get(n) || 'poze/' + encodeURIComponent(n);
+const saveFidx = () => KV.set('fotoIdx', FIDX);
+async function loadHeic() {
+  if (window.heic2any) return;
+  await new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'heic.js'; s.onload = res; s.onerror = () => rej(new Error('Nu s-a putut încărca convertorul HEIC')); document.head.appendChild(s); });
+}
+async function compress(file) {
+  const heic = /hei[cf]/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
+  let bmp = null;
+  try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) {}
+  if (!bmp && heic) {
+    await loadHeic();
+    let out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 }); if (Array.isArray(out)) out = out[0];
+    bmp = await createImageBitmap(out, { imageOrientation: 'from-image' });
+  }
+  if (!bmp) throw new Error('Formatul imaginii nu este recunoscut');
+  const M = 1600, k = Math.min(1, M / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); bmp.close && bmp.close();
+  const b = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.75));
+  if (!b) throw new Error('Imaginea nu a putut fi comprimată');
+  return b;
+}
+async function dropPhoto(n) { if (!FIDX[n]) return; delete FIDX[n]; const u = FURL.get(n); if (u) URL.revokeObjectURL(u); FURL.delete(n); await KV.del('foto:' + n); await saveFidx(); }
+
 // ---------- formular adăugare / editare ----------
 function openForm(h, ll) {
   const isNew = !h;
   const s = h ? clone(h) : { id: '', localitate: lastLoc, adresa: '', lat: +ll.lat.toFixed(6), lng: +ll.lng.toFixed(6), tip: 'h-sub', racord: '', stare: 'neverificat', aprox: false, acces: null, obs: '', poze: [] };
   const opt = (v, l, cur) => `<option value="${esc(v)}"${String(cur) === String(v) ? ' selected' : ''}>${esc(l)}</option>`;
   const rac = ['', 'A', 'B', 'C']; if (s.racord && !rac.includes(s.racord)) rac.push(s.racord);
-  const locs = [...locCanon().values()].sort((a, b) => a.localeCompare(b, 'ro'));
+  const locs = [...new Set([...A.streetLocs(), ...locCanon().values()])].sort((a, b) => a.localeCompare(b, 'ro'));
+  if (s.localitate && !locs.includes(s.localitate)) locs.push(s.localitate);
+  const pa = parseAddr(s.adresa, s.localitate);
+  let picked = pa.s, manual = !pa.s && !!s.adresa, auto = isNew;
+  let manSt = s.adresa, manNr = '';
+  if (manual) { const m = /^(.*?)(?:,?\s*(?:nr\.?|numărul|numarul)\s*|\s+)(\d+\s*[a-zA-Z]?(?:\s*[-/]\s*\d+[a-zA-Z]?)?)\s*$/i.exec(s.adresa); if (m) { manSt = m[1].replace(/[,\s]+$/, ''); manNr = m[2].replace(/\s+/g, '').toUpperCase(); } }
+  const fotos = (s.poze || []).map(n => ({ n }));
   panel(head(isNew ? 'Sursă nouă' : esc(s.id), isNew ? 'ID-ul se generează la salvare' : 'Editare') + `
   <form class="af" id="af" novalidate>
     <label>Tip<select name="tip">${Object.entries(TIPURI).map(([k, v]) => opt(k, v.l, s.tip)).join('')}</select></label>
-    <label>Localitate<input name="localitate" list="locs" value="${esc(s.localitate)}" autocomplete="off"></label>
-    <label>Adresă<input name="adresa" value="${esc(s.adresa)}" placeholder="Strada, nr." autocomplete="off"></label>
-    <label>Stare<select name="stare">${['functional', 'defect', 'neverificat'].map(k => opt(k, LBL[k], s.stare)).join('')}</select></label>
+    <label>Localitate<select name="localitate">${locs.map(l => opt(l, l, s.localitate)).join('')}</select></label>
+    <label>Stradă<input name="strada" value="${esc(picked ? picked.n : manSt)}" placeholder="Începe să scrii numele străzii" autocomplete="off" spellcheck="false"></label>
+    <div class="sug" role="listbox" hidden></div>
+    <div class="hint near" hidden></div>
+    <div class="hint man" ${manual ? '' : 'hidden'}>⚠ Adresă scrisă manual, nu e din listă. <button type="button" class="lnk" data-unman>Alege din listă</button></div>
+    <div class="ll"><label>Număr<input name="nr" value="${esc(picked ? pa.nr : manNr)}" placeholder="ex. 12A" maxlength="12" autocomplete="off"></label>
+      <label>Stare<select name="stare">${['functional', 'defect', 'neverificat'].map(k => opt(k, LBL[k], s.stare)).join('')}</select></label></div>
+    <p class="hint"><button type="button" class="lnk" data-man>Strada nu e în listă?</button></p>
     <label data-h>Racord<select name="racord">${rac.map(v => opt(v, v || '—', s.racord)).join('')}</select></label>
     <label data-s>Acces autospecială<select name="acces">${opt('', '—', s.acces == null ? '' : 'x')}${opt('da', 'Da', s.acces === true ? 'da' : '')}${opt('nu', 'Nu', s.acces === false ? 'nu' : '')}</select></label>
     <label class="chk"><input type="checkbox" name="aprox"${s.aprox ? ' checked' : ''}> Locație aproximativă</label>
+    <label class="chk"><input type="checkbox" name="foto"${fotos.length ? ' checked' : ''}> Fotografie</label>
+    <div class="fotos" hidden><div class="thumbs"></div>
+      <button type="button" class="abtn" data-addf>+ Adaugă fotografie</button>
+      <p class="hint">Maxim ${FOTO_MAX}. Se comprimă automat (și cele HEIC de pe iPhone).</p><div class="ferr fe"></div></div>
     <div class="ll"><label>Latitudine<input name="lat" inputmode="decimal" value="${s.lat}"></label><label>Longitudine<input name="lng" inputmode="decimal" value="${s.lng}"></label></div>
     <p class="hint">Trage pinul roșu de pe hartă pentru poziția exactă sau <button type="button" class="lnk" data-pick>alege alt loc pe hartă</button>.</p>
     <label>Observații<textarea name="obs" rows="2">${esc(s.obs)}</textarea></label>
-    <div class="ferr" role="alert"></div>
+    <div class="ferr fm" role="alert"></div>
     <div class="adm-row"><button class="abtn pri" type="submit">Salvează</button><button class="abtn" type="button" data-x>Anulează</button></div>
-  </form><datalist id="locs">${locs.map(l => `<option value="${esc(l)}">`).join('')}</datalist>`);
+  </form>`);
   formOpen = true;
-  const f = sheet.querySelector('#af'), err = f.querySelector('.ferr');
+  const f = sheet.querySelector('#af'), err = f.querySelector('.fm'), sug = f.querySelector('.sug'), near = f.querySelector('.near'), man = f.querySelector('.man');
   const tipSync = () => { const H = !!(TIPURI[f.tip.value] || TIPURI.h).h; f.querySelector('[data-h]').hidden = !H; f.querySelector('[data-s]').hidden = H; };
   f.tip.onchange = tipSync; tipSync();
-  const setLL = p => { f.lat.value = (+p.lat).toFixed(6); f.lng.value = (+p.lng).toFixed(6); };
+  // stradă cu sugestii
+  const pick = st => {
+    picked = st; manual = false; man.hidden = true; sug.hidden = true;
+    f.strada.value = st.n; if (f.localitate.value !== st.l) { if (![...f.localitate.options].some(o => o.value === st.l)) f.localitate.add(new Option(st.l, st.l)); f.localitate.value = st.l; }
+  };
+  const showSug = () => {
+    if (manual) { sug.hidden = true; return; }
+    const L = findStreets(f.strada.value, f.localitate.value);
+    if (!f.strada.value.trim()) { sug.hidden = true; return; }
+    sug.innerHTML = L.length ? L.map((st, i) => `<button type="button" data-i="${i}">${esc(st.n)}<small>${esc(st.l)}</small></button>`).join('')
+      : `<div class="empty">Nicio stradă găsită. Încearcă doar o parte din nume.</div>`;
+    sug.hidden = false; sug._L = L;
+  };
+  f.strada.addEventListener('input', () => { auto = false; if (!manual) picked = null; showSug(); });
+  f.strada.addEventListener('focus', () => { if (!picked) showSug(); });
+  f.strada.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); const b = sug.querySelector('button'); if (b && !sug.hidden) b.click(); } });
+  sug.addEventListener('mousedown', e => e.preventDefault());
+  sug.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; auto = false; pick(sug._L[+b.dataset.i]); f.nr.focus(); });
+  f.localitate.onchange = () => { if (picked && picked.l !== f.localitate.value) { picked = null; f.strada.value = ''; } auto = false; };
+  f.querySelector('[data-man]').onclick = () => { manual = true; picked = null; auto = false; man.hidden = false; sug.hidden = true; f.strada.focus(); };
+  f.querySelector('[data-unman]').onclick = () => { manual = false; man.hidden = true; showSug(); f.strada.focus(); };
+  // cea mai apropiată stradă de pin
+  const nearUpd = async p => {
+    await A.streetsReady; await loadGeo();
+    const r = nearestStreet(p); if (!r) { near.hidden = true; return; }
+    const dm = Math.round(r.d);
+    if (auto && !manual && (r.exact ? dm < 150 : dm < 400)) { pick(r.s); near.hidden = true; return; }
+    if (picked && picked.i === r.s.i) { near.hidden = true; return; }
+    near.innerHTML = `Cea mai apropiată stradă de pin: <b>${esc(r.s.n)}</b>, ${esc(r.s.l)} (${dm} m) <button type="button" class="lnk">Folosește</button>`;
+    near.hidden = false; near.querySelector('button').onclick = () => { pick(r.s); near.hidden = true; };
+  };
+  // poziție
+  const setLL = p => { f.lat.value = (+p.lat).toFixed(6); f.lng.value = (+p.lng).toFixed(6); nearUpd(p); };
   const llNow = () => ({ lat: parseFloat(String(f.lat.value).replace(',', '.')), lng: parseFloat(String(f.lng.value).replace(',', '.')) });
   setTmp([s.lng, s.lat]); onTmp = setLL;
-  const onLL = () => { const p = llNow(); if (isFinite(p.lat) && isFinite(p.lng)) setTmp([p.lng, p.lat]); };
+  const onLL = () => { const p = llNow(); if (isFinite(p.lat) && isFinite(p.lng)) { setTmp([p.lng, p.lat]); nearUpd(p); } };
   f.lat.onchange = onLL; f.lng.onchange = onLL;
   f.querySelector('[data-pick]').onclick = () => {
     sheet.classList.remove('open');
     beginPick('Atinge harta în noul loc', p => { setLL(p); setTmp(p); sheet.classList.add('open'); });
   };
   if (innerWidth < 760) map.easeTo({ center: [s.lng, s.lat], offset: [0, -innerHeight * 0.3], duration: 400 });
-  f.onsubmit = e => {
+  nearUpd({ lat: s.lat, lng: s.lng });
+  // fotografii
+  const fbox = f.querySelector('.fotos'), thumbs = f.querySelector('.thumbs'), ferr = f.querySelector('.fe'), addf = f.querySelector('[data-addf]');
+  const fsync = () => {
+    fbox.hidden = !f.foto.checked;
+    thumbs.innerHTML = fotos.map((x, i) => `<div class="th"><img src="${esc(x.url || (W.demo && !FURL.has(x.n) ? '' : A.photoUrl(x.n)))}" alt=""><button type="button" data-rm="${i}" aria-label="Șterge fotografia">×</button></div>`).join('');
+    addf.disabled = fotos.length >= FOTO_MAX;
+  };
+  thumbs.addEventListener('click', e => { const b = e.target.closest('[data-rm]'); if (!b) return; const x = fotos.splice(+b.dataset.rm, 1)[0]; if (x.url) URL.revokeObjectURL(x.url); fsync(); });
+  f.foto.onchange = fsync; fsync();
+  addf.onclick = () => {
+    const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*,.heic,.heif'; i.multiple = true;
+    i.onchange = async () => {
+      ferr.textContent = ''; addf.disabled = true; const old = addf.textContent; addf.textContent = 'Se comprimă…';
+      for (const file of [...i.files].slice(0, FOTO_MAX - fotos.length)) {
+        try { const b = await compress(file); fotos.push({ blob: b, url: URL.createObjectURL(b) }); }
+        catch (e) { ferr.textContent = (file.name || 'Imaginea') + ': ' + (e.message || e); }
+      }
+      addf.textContent = old; fsync();
+    };
+    i.click();
+  };
+  A.adminAddPhoto = async blob => { fotos.push({ blob, url: URL.createObjectURL(blob) }); fsync(); }; // pentru teste
+  f.onsubmit = async e => {
     e.preventDefault(); err.textContent = '';
     const p = llNow();
     if (!(isFinite(p.lat) && isFinite(p.lng))) { err.textContent = 'Coordonatele nu sunt valide.'; return; }
     if (p.lng < BOUNDS[0][0] || p.lng > BOUNDS[1][0] || p.lat < BOUNDS[0][1] || p.lat > BOUNDS[1][1]) { err.textContent = 'Punctul e în afara zonei hărții.'; return; }
-    const loc = str(f.localitate.value); if (!loc) { err.textContent = 'Completează localitatea.'; return; }
-    const canon = locCanon().get(norm(loc)) || loc;
+    const loc = f.localitate.value;
+    const stTxt = str(f.strada.value), nr = str(f.nr.value).toUpperCase();
+    if (stTxt && !picked && !manual) { err.textContent = 'Alege strada din listă (sau „Strada nu e în listă?”).'; f.strada.focus(); showSug(); return; }
+    if (!stTxt && nr) { err.textContent = 'Ai completat numărul, dar nu și strada.'; return; }
+    const adresa = (picked ? picked.n : stTxt) + (stTxt && nr ? ' nr. ' + nr : '');
     const tip = f.tip.value, H = !!(TIPURI[tip] || TIPURI.h).h;
     const n = Object.assign({}, s, {
-      tip, localitate: canon, adresa: str(f.adresa.value), stare: f.stare.value,
+      tip, localitate: loc, adresa, stare: f.stare.value,
       racord: H ? f.racord.value : '', acces: H ? null : (f.acces.value === 'da' ? true : f.acces.value === 'nu' ? false : null),
       aprox: f.aprox.checked, obs: str(f.obs.value), lat: +p.lat.toFixed(6), lng: +p.lng.toFixed(6)
     });
-    lastLoc = canon;
+    if (isNew) n.id = genId(loc, W.surse);
+    // fotografii: nume după ID (TM-0001.jpg, TM-0001-2.jpg, TM-0001-3.jpg)
+    const keep = f.foto.checked ? fotos : [];
+    const used = new Set(keep.filter(x => x.n).map(x => x.n)), names = [];
+    for (const x of keep) {
+      if (x.n) { names.push(x.n); continue; }
+      let k = 1, nm; do { nm = n.id + (k > 1 ? '-' + k : '') + '.jpg'; k++; } while (used.has(nm)); used.add(nm);
+      await KV.set('foto:' + nm, x.blob); FIDX[nm] = { pend: 1 }; FURL.set(nm, x.url); x.url = null; names.push(nm);
+    }
+    for (const old of s.poze || []) if (!names.includes(old) && FIDX[old] && FIDX[old].pend) await dropPhoto(old);
+    await saveFidx();
+    n.poze = names;
+    lastLoc = loc;
     if (isNew) {
-      n.id = genId(canon, W.surse); W.surse.push(n);
-      hist({ tip: 'add', id: n.id, txt: `${n.id}: adăugat (${tipL(n)}, ${n.adresa || 'fără adresă'}, ${n.localitate}, ${(LBL[n.stare] || '').toLowerCase()})` });
+      W.surse.push(n);
+      hist({ tip: 'add', id: n.id, txt: `${n.id}: adăugat (${tipL(n)}, ${n.adresa || 'fără adresă'}, ${n.localitate}, ${(LBL[n.stare] || '').toLowerCase()}${names.length ? ', ' + names.length + ' foto' : ''})` });
     } else {
       const old = A.byId(s.id), ch = diff(old, n);
       if (!ch.length) { closePanel(); A.openSheet(old); return; }
@@ -223,6 +395,7 @@ function openForm(h, ll) {
 
 function del(id) {
   const s = A.byId(id); if (!s) return;
+  for (const n of s.poze || []) if (FIDX[n] && FIDX[n].pend) dropPhoto(n);
   W.surse = W.surse.filter(x => x.id !== id);
   hist({ tip: 'del', id, txt: `${id}: șters (${tipL(s)}, ${s.adresa || 'fără adresă'}, ${s.localitate})` });
   closePanel(); commit();
@@ -255,8 +428,8 @@ function showHist() {
 }
 
 // ---------- publicare ----------
-function download(name, text, type) {
-  const b = new Blob([text], { type }), u = URL.createObjectURL(b), a = document.createElement('a');
+function download(name, data, type) {
+  const b = new Blob([data], { type }), u = URL.createObjectURL(b), a = document.createElement('a');
   a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000);
 }
 const TIP_X = { 'h-sub': 'Hidrant subteran', 'h-sup': 'Hidrant suprateran', h: 'Hidrant', nat: 'Sursă naturală', rez: 'Rezervor/bazin', put: 'Puț/fântână' };
@@ -283,13 +456,23 @@ function showPub() {
    <div class="adm-row"><button class="abtn" data-pin>Schimbă PIN-ul</button></div><div class="pinf"></div></div>
   <div class="sec"><h4>Zonă periculoasă</h4>
    <div class="adm-row"><button class="abtn danger" data-clr>Șterge toate sursele</button></div></div>`);
-  sheet.querySelector('[data-p]').onclick = () => {
+  const pend = () => Object.keys(FIDX).filter(n => FIDX[n].pend && W.surse.some(x => (x.poze || []).includes(n)));
+  if (pend().length) sheet.querySelector('[data-p]').textContent = `Publică: descarcă arhiva (date + ${pend().length} fotografii)`;
+  sheet.querySelector('[data-p]').onclick = async () => {
     W.actualizat = today(); W.publicat = new Date().toISOString(); W.versiune = 1;
-    const out = clone(W);
-    download('hidranti.json', JSON.stringify(out), 'application/json');
+    const out = clone(W), P = pend(), json = JSON.stringify(out);
+    if (P.length) {
+      const files = { 'hidranti.json': fflate.strToU8(json) };
+      for (const n of P) { const b = await KV.get('foto:' + n); if (b) files['poze/' + n] = new Uint8Array(await b.arrayBuffer()); }
+      const z = fflate.zipSync(files, { level: 0 });
+      download('HydroTM-publicare-' + today() + '.zip', z, 'application/zip');
+      for (const n of P) FIDX[n].pend = 0; saveFidx();
+    } else download('hidranti.json', json, 'application/json');
     hist({ tip: 'publish', txt: `Publicare: hidranti.json cu ${W.surse.length} surse, ${DIRTY} modificări` });
     DIRTY = 0; BASE = W.publicat; NOTE = ''; A.setData(W); save(); updBar();
-    sheet.querySelector('.pubok').innerHTML = `<div class="note">Fișierul <b>hidranti.json</b> a fost descărcat. Urcă-l pe găzduire, lângă aplicație, în locul celui vechi. Telefoanele colegilor îl iau automat când au semnal.</div>`;
+    sheet.querySelector('.pubok').innerHTML = P.length
+      ? `<div class="note">Arhiva cu <b>hidranti.json</b> și <b>${P.length} fotografii</b> (folderul <b>poze</b>) a fost descărcată. Trimite-o lui Claude sau urc-o pe GitHub, în locul fișierelor vechi.</div>`
+      : `<div class="note">Fișierul <b>hidranti.json</b> a fost descărcat. Urcă-l pe găzduire, lângă aplicație, în locul celui vechi. Telefoanele colegilor îl iau automat când au semnal.</div>`;
     sheet.querySelector('[data-dirty]').textContent = '0';
   };
   sheet.querySelector('[data-x2]').onclick = exportExcel;
@@ -309,6 +492,7 @@ function showPub() {
   };
   sheet.querySelector('[data-clr]').onclick = e => arm(e.currentTarget, `Apasă din nou: șterge ${W.surse.length} surse`, () => {
     hist({ tip: 'clear', txt: `Toate sursele au fost șterse (${W.surse.length})` });
+    for (const n of Object.keys(FIDX)) if (FIDX[n].pend) dropPhoto(n);
     W.surse = []; W.demo = false; commit(); showPub();
   });
 }
@@ -459,6 +643,7 @@ function analyze(o) {
     const f = {}, W2 = m => r.warn.push(`Rândul ${rn}${id ? ' (' + id + ')' : ''}: ${m}`);
     const loc = str(g(row, 'localitate')); if (loc) f.localitate = canon.get(norm(loc)) || loc;
     const adr = str(g(row, 'adresa')); if (adr) f.adresa = adr;
+    if (adr && A.streets().length > 40) { const pa = parseAddr(adr, f.localitate || (old && old.localitate) || 'Timișoara'); if (!pa.s) W2(`strada „${adr}” nu e găsită în lista de străzi`); }
     const t = normTip(g(row, 'tip')); if (t) { f.tip = t.v; if (!t.ok) W2(`tip necunoscut „${str(g(row, 'tip'))}” → hidrant`); }
     const sv = g(row, 'stare'), st = normStare(sv);
     if (st) { f.stare = st.v; if (!st.ok) r.unk.push(`Rândul ${rn}${id ? ' (' + id + ')' : ''}: „${str(sv)}”`); } else if (!old) r.noState++;
@@ -575,8 +760,12 @@ async function start() {
   const pend = A.LS.get('hydrotm-pin-pending');
   if (pend && (pub.config || {}).pinHash === pend) A.LS.set('hydrotm-pin-pending', null);
   else if (pend && W.config.pinHash !== pend) { W.config.pinHash = pend; DIRTY = Math.max(DIRTY, 1); }
+  FIDX = (await KV.get('fotoIdx').catch(() => null)) || {};
+  for (const n of Object.keys(FIDX)) { const b = await KV.get('foto:' + n).catch(() => null); if (b) FURL.set(n, URL.createObjectURL(b)); else delete FIDX[n]; }
   A.setData(W); updBar(); save();
   if (conflict) showPub();
+  // pozele deja publicate și ajunse pe găzduire nu mai trebuie ținute local
+  for (const n of Object.keys(FIDX)) if (!FIDX[n].pend) fetch('poze/' + encodeURIComponent(n), { method: 'HEAD', cache: 'no-store' }).then(r => { if (r.ok) dropPhoto(n); }).catch(() => {});
 }
 window.HydroAdmin = { start };
 })();

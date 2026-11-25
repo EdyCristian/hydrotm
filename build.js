@@ -70,8 +70,10 @@ const admin = [
   '/* HydroTM admin — se încarcă doar după PIN */',
   R('node_modules/proj4/dist/proj4.js'),
   R('node_modules/xlsx/dist/xlsx.mini.min.js'),
+  R('node_modules/fflate/umd/index.js'),
   R('src/admin.src.js')
 ].join('\n;\n');
 fs.writeFileSync(path.join(out, 'admin.js'), admin);
-for (const f of ['index.html', 'admin.js', 'hidranti.json'])
+fs.copyFileSync(path.join(__dirname, 'node_modules/heic2any/dist/heic2any.js'), path.join(out, 'heic.js'));
+for (const f of ['index.html', 'admin.js', 'hidranti.json', 'heic.js'])
   console.log(f.padEnd(14), (fs.statSync(path.join(out, f)).size / 1024).toFixed(0) + ' KB');
