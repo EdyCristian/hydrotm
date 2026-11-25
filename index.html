@@ -17,7 +17,7 @@
   :root{--bg:#121417;--panel:#1b1e22;--ink:#eef0f2;--muted:#a3a9b1;--line:#2c3036;--soft:#24282d;--shadow:0 6px 24px rgba(0,0,0,.55)}
 }
 *{box-sizing:border-box}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overscroll-behavior:none;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-tap-highlight-color:transparent}
 #map{position:fixed;inset:0}
 
 /* bara de sus */
@@ -69,6 +69,8 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:16px/1
 /* fișa hidrantului */
 .sheet{position:fixed;z-index:1100;left:0;right:0;bottom:0;background:var(--panel);border-radius:18px 18px 0 0;box-shadow:var(--shadow);padding:8px 16px calc(env(safe-area-inset-bottom) + 16px);transform:translateY(110%);transition:transform .22s ease;max-height:68vh;overflow-y:auto}
 .sheet.open{transform:none}
+.sheet{overscroll-behavior:contain}
+.sheet.drag{transition:none}
 @media (min-width:760px){.sheet{left:10px;right:auto;bottom:10px;width:380px;border-radius:18px;max-height:calc(100vh - 110px)}}
 @media (prefers-reduced-motion:reduce){.sheet{transition:none}}
 .grab{width:42px;height:5px;border-radius:3px;background:var(--line);margin:4px auto 10px}
@@ -230,7 +232,7 @@ return maplibregl$1;
 </script>
 <script>
 {
-const VER='202611251305';
+const VER='202611251312';
 // ---------- raportare erori ----------
 const errBox=m=>{const st=document.getElementById('stamp');if(!st||(st.dataset.e||'').includes(m))return;st.dataset.e=(st.dataset.e||'')+m;st.insertAdjacentHTML('beforeend','<br><b style="color:var(--bad)">Eroare: '+String(m).replace(/[&<>"']/g,'').slice(0,160)+'</b>');};
 window.addEventListener('error',e=>errBox(e.message||'eroare script'));
@@ -386,11 +388,35 @@ function openSheet(h){
   ${h.obs?`<div class="obs"><b>Observații</b>${esc(h.obs)}</div>`:''}
   ${photoBox(h)}
 `;
-  sheet.classList.add('open');
+  sheet.classList.add('open');sheet.scrollTop=0;
   document.getElementById('close').onclick=closeSheet;
   if(A.onSheet)A.onSheet(h,sheet);
   if(innerWidth<760){const p=map.project([h.lng,h.lat]);const ty=Math.max(200,innerHeight*0.2);map.panBy([p.x-innerWidth/2,p.y-ty]);}
 }
+// tragere în jos a fișei, pe telefon: urmează degetul; peste 25% din înălțime sau tragere rapidă = închide
+let dg=null;
+sheet.addEventListener('touchstart',e=>{
+  if(innerWidth>=760||A.sheetLock||e.touches.length!==1||!sheet.classList.contains('open')){dg=null;return;}
+  const t=e.touches[0];dg={x0:t.clientX,y0:t.clientY,on:false,dy:0,ly:t.clientY,lt:performance.now(),v:0};
+},{passive:true});
+sheet.addEventListener('touchmove',e=>{
+  if(!dg)return;const t=e.touches[0];
+  if(!dg.on){
+    const dy=t.clientY-dg.y0,dx=t.clientX-dg.x0;
+    if(Math.abs(dy)<8&&Math.abs(dx)<8)return;
+    if(dy>0&&sheet.scrollTop<=0&&Math.abs(dy)>Math.abs(dx)){dg.on=true;dg.y0=t.clientY;sheet.classList.add('drag');}
+    else{dg=null;return;}
+  }
+  e.preventDefault();
+  const now=performance.now(),dt=now-dg.lt;if(dt>0)dg.v=(t.clientY-dg.ly)/dt;dg.ly=t.clientY;dg.lt=now;
+  dg.dy=Math.max(0,t.clientY-dg.y0);sheet.style.transform=`translateY(${dg.dy}px)`;
+},{passive:false});
+const dragEnd=()=>{
+  const d=dg;dg=null;if(!d||!d.on)return;
+  sheet.classList.remove('drag');sheet.style.transform='';
+  if(d.dy>sheet.offsetHeight*0.25||(d.v>0.35&&d.dy>30))closeSheet();
+};
+sheet.addEventListener('touchend',dragEnd);sheet.addEventListener('touchcancel',dragEnd);
 function closeSheet(){sheet.classList.remove('open');A.sheetLock=false;if(selected){const p=selected;selected=null;refreshPin(p);}}
 A.openSheet=openSheet;A.closeSheet=closeSheet;
 map.on('click',e=>{if(A.pick){A.pick(e.lngLat);return;}if(A.sheetLock)return;closeSheet();});
