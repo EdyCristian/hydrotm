@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#b3161b">
+<title>HydroTM</title>
+<style>/*ML_CSS*/</style>
+<style>
+:root{
+  --red:#b3161b;--red-d:#8e1014;
+  --bg:#ffffff;--panel:#ffffff;--ink:#16181b;--muted:#5d636b;--line:#e2e4e7;--soft:#f3f4f6;
+  --ok:#1e9e4a;--bad:#d7261e;--unk:#8a9097;--q:#f2b705;
+  --shadow:0 6px 24px rgba(0,0,0,.18);
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#121417;--panel:#1b1e22;--ink:#eef0f2;--muted:#a3a9b1;--line:#2c3036;--soft:#24282d;--shadow:0 6px 24px rgba(0,0,0,.55)}
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-tap-highlight-color:transparent}
+#map{position:fixed;inset:0}
+
+/* bara de sus */
+.top{position:fixed;z-index:1000;top:0;left:0;right:0;padding:calc(env(safe-area-inset-top) + 10px) 10px 0;pointer-events:none}
+.bar{pointer-events:auto;max-width:560px;display:flex;align-items:center;gap:8px;background:var(--panel);border-radius:14px;box-shadow:var(--shadow);padding:6px 6px 6px 12px}
+.logo{display:flex;align-items:center;gap:6px;font-weight:800;letter-spacing:-.02em;color:var(--red);white-space:nowrap;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none}
+.logo svg{width:22px;height:22px}
+.logo.hold svg{animation:hold 6s linear forwards}
+@keyframes hold{0%,50%{transform:scale(1)}100%{transform:scale(1.35)}}
+@media (prefers-color-scheme:dark){.logo{color:#ff4d4f}}
+.search{flex:1;position:relative}
+.search input{width:100%;height:44px;border:0;background:var(--soft);color:var(--ink);border-radius:10px;padding:0 40px 0 12px;font-size:16px;outline:none}
+.search input:focus{box-shadow:0 0 0 2px var(--red) inset}
+.search input::-webkit-search-cancel-button{display:none}
+.clear{position:absolute;right:2px;top:2px;width:40px;height:40px;border:0;background:none;color:var(--muted);font-size:22px;cursor:pointer;display:none}
+.results{pointer-events:auto;max-width:560px;margin-top:6px;background:var(--panel);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;display:none;max-height:55vh;overflow-y:auto}
+.results button{display:flex;gap:10px;align-items:center;width:100%;text-align:left;border:0;background:none;color:var(--ink);padding:12px 14px;min-height:52px;font-size:16px;border-bottom:1px solid var(--line);cursor:pointer}
+.results button:last-child{border-bottom:0}
+.results button:hover,.results button:focus{background:var(--soft);outline:none}
+.results small{display:block;color:var(--muted);font-size:13px}
+.ri{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--soft);font-size:14px}
+.ri.s{border-radius:7px}
+.empty{padding:14px;color:var(--muted)}
+.stamp{pointer-events:auto;display:inline-block;margin-top:6px;font-size:13px;background:var(--panel);color:var(--muted);padding:4px 10px;border-radius:999px;box-shadow:var(--shadow)}
+.stamp b{color:var(--ink);font-weight:600}
+
+/* legenda */
+.legend{position:fixed;z-index:900;left:10px;bottom:calc(env(safe-area-inset-bottom) + 24px);background:var(--panel);border-radius:12px;box-shadow:var(--shadow);padding:8px 12px;font-size:13px;display:flex;gap:12px;flex-wrap:wrap;max-width:calc(100% - 20px)}
+.legend span{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.dot{width:12px;height:12px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
+.sqr{width:12px;height:12px;border-radius:3px;background:var(--unk);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
+.qb{width:16px;height:16px;border-radius:50%;background:var(--q);color:#111;font-weight:800;font-size:11px;display:grid;place-items:center}
+
+/* pin hidrant / sursă */
+.hp{position:relative;width:30px;height:30px}
+.hp .c{position:absolute;inset:0;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.45);display:grid;place-items:center}
+.hp.sq .c{border-radius:8px}
+.hp svg{width:16px;height:16px;fill:#fff}
+.hp .q{position:absolute;right:-7px;top:-7px;width:18px;height:18px;border-radius:50%;background:var(--q);color:#111;font:800 12px/18px system-ui,sans-serif;text-align:center;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.hp.sel .c{transform:scale(1.25);box-shadow:0 0 0 4px rgba(179,22,27,.35),0 2px 6px rgba(0,0,0,.45)}
+.hl{position:absolute;left:34px;top:5px;white-space:nowrap;font:700 12px/1 system-ui,sans-serif;color:#111;background:rgba(255,255,255,.92);padding:3px 5px;border-radius:5px;display:none}
+.showlabels .hl{display:block}
+@media (prefers-color-scheme:dark){.hl{background:rgba(27,30,34,.92);color:#eef0f2}}
+
+/* bule cluster */
+.cl{border-radius:50%;background:rgba(179,22,27,.25);display:grid;place-items:center}
+.cl div{width:34px;height:34px;border-radius:50%;background:var(--red);color:#fff;font-weight:700;font-size:14px;display:grid;place-items:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)}
+
+/* fișa hidrantului */
+.sheet{position:fixed;z-index:1100;left:0;right:0;bottom:0;background:var(--panel);border-radius:18px 18px 0 0;box-shadow:var(--shadow);padding:8px 16px calc(env(safe-area-inset-bottom) + 16px);transform:translateY(110%);transition:transform .22s ease;max-height:68vh;overflow-y:auto}
+.sheet.open{transform:none}
+@media (min-width:760px){.sheet{left:10px;right:auto;bottom:10px;width:380px;border-radius:18px;max-height:calc(100vh - 110px)}}
+@media (prefers-reduced-motion:reduce){.sheet{transition:none}}
+.grab{width:42px;height:5px;border-radius:3px;background:var(--line);margin:4px auto 10px}
+.sh-head{display:flex;align-items:flex-start;gap:10px}
+.sh-head h2{margin:0;font-size:24px;line-height:1.1;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
+.sh-head .qbig{width:26px;height:26px;border-radius:50%;background:var(--q);color:#111;font-size:16px;font-weight:800;display:grid;place-items:center;flex:none}
+.addr{color:var(--muted);margin:4px 0 0}
+.x{margin-left:auto;flex:none;width:44px;height:44px;border:0;border-radius:50%;background:var(--soft);color:var(--ink);font-size:22px;cursor:pointer}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;font-weight:700;font-size:14px;color:#fff;margin-top:12px}
+.warn{margin-top:10px;padding:10px 12px;border-radius:10px;background:rgba(242,183,5,.16);border:1px solid rgba(242,183,5,.5);font-size:14px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;margin:14px 0 0;font-size:15px}
+dt{color:var(--muted)}dd{margin:0;font-weight:600}
+.obs{margin-top:12px;padding:10px 12px;background:var(--soft);border-radius:10px;font-size:15px}
+.obs b{display:block;font-size:13px;color:var(--muted);font-weight:600;margin-bottom:2px}
+.photo{margin-top:12px;border-radius:12px;overflow:hidden;background:var(--soft);aspect-ratio:4/3;display:grid;place-items:center;color:var(--muted);font-size:14px}
+.photo svg,.photo img{width:100%;height:100%;object-fit:cover}
+.nav{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.nav a{display:flex;align-items:center;justify-content:center;gap:8px;height:56px;border-radius:14px;font-weight:700;font-size:17px;text-decoration:none;color:#fff}
+.gm{background:#1a73e8}.wz{background:#33ccff;color:#06283d!important}
+.nav svg{width:22px;height:22px}
+
+/* mesaj informare / PIN */
+.modal{position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:20px}
+.modal[hidden]{display:none}
+.card{background:var(--panel);border-radius:18px;max-width:420px;width:100%;padding:22px;box-shadow:var(--shadow)}
+.card h3{margin:0 0 8px;font-size:22px;color:var(--red)}
+@media (prefers-color-scheme:dark){.card h3{color:#ff4d4f}}
+.card p{margin:0 0 10px;color:var(--ink)}
+.card .ok{width:100%;height:52px;border:0;border-radius:12px;background:var(--red);color:#fff;font-weight:700;font-size:17px;margin-top:8px;cursor:pointer}
+.card .ghost{width:100%;height:44px;border:0;border-radius:12px;background:var(--soft);color:var(--ink);font-weight:600;font-size:16px;margin-top:8px;cursor:pointer}
+.pin{width:100%;height:60px;border:0;border-radius:12px;background:var(--soft);color:var(--ink);font-size:30px;letter-spacing:.6em;text-align:center;padding-left:.6em;outline:none}
+.pin:focus{box-shadow:0 0 0 2px var(--red) inset}
+.pinmsg{min-height:22px;font-size:14px;color:var(--bad);margin-top:6px}
+.shake{animation:shake .35s}
+@keyframes shake{25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
+.demo{font-size:13px;color:var(--muted)}
+.maplibregl-ctrl-group button{width:44px!important;height:44px!important}
+.maplibregl-ctrl-group{border-radius:10px!important;box-shadow:var(--shadow)!important}
+@media (prefers-color-scheme:dark){.maplibregl-ctrl-group{background:#1b1e22}.maplibregl-ctrl-group button+button{border-top-color:#2c3036}.maplibregl-ctrl-icon{filter:invert(1)}.maplibregl-ctrl-attrib{background:rgba(27,30,34,.8)!important;color:#a3a9b1}.maplibregl-ctrl-attrib a{color:#cfd3d8}.maplibregl-ctrl-attrib-button{filter:invert(1)}}
+.maplibregl-ctrl-bottom-right{bottom:calc(env(safe-area-inset-bottom) + 0px)}
+@media (max-width:759px){.maplibregl-ctrl-bottom-right{bottom:calc(env(safe-area-inset-bottom) + 70px)}}
+.hp,.cl{cursor:pointer}
+.hlwrap{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
+.hlring{position:absolute;left:50%;bottom:11px;transform:translate(-50%,50%);border-radius:50%;border:3px dashed #b3161b;background:rgba(255,212,0,.18);z-index:-1}
+.stl{background:#ffd400;color:#111;border:2px solid #b3161b;font-weight:800;font-size:15px;padding:5px 10px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.4);white-space:nowrap}
+.hlpulse{width:22px;height:22px;border-radius:50%;background:#ffd400;border:4px solid #b3161b;animation:pulse 1.6s ease-out infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,212,0,.85)}100%{box-shadow:0 0 0 36px rgba(255,212,0,0)}}
+@media (prefers-reduced-motion:reduce){.hlpulse{animation:none}}
+</style>
+</head>
+<body>
+<div id="map" aria-label="Harta hidranților"></div>
+
+<div class="top">
+  <div class="bar">
+    <div class="logo" aria-label="HydroTM">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c3.6 4.3 6.5 8 6.5 11.5A6.5 6.5 0 0 1 5.5 13.5C5.5 10 8.4 6.3 12 2z"/></svg>HydroTM
+    </div>
+    <div class="search">
+      <input id="q" type="search" placeholder="Caută stradă sau ID hidrant" autocomplete="off" aria-label="Caută stradă sau ID hidrant">
+      <button class="clear" id="clr" aria-label="Șterge căutarea">×</button>
+    </div>
+  </div>
+  <div class="results" id="res" role="listbox"></div>
+  <div class="stamp" id="stamp">Se încarcă datele…</div>
+</div>
+
+<div class="legend" aria-label="Legendă">
+  <span><i class="dot" style="background:var(--ok)"></i>Funcțional</span>
+  <span><i class="dot" style="background:var(--bad)"></i>Defect</span>
+  <span><i class="dot" style="background:var(--unk)"></i>Neverificat</span>
+  <span><i class="qb">?</i>Locație aproximativă</span>
+  <span><i class="sqr"></i>Altă sursă de apă</span>
+</div>
+
+<section class="sheet" id="sheet" aria-live="polite"></section>
+
+<div class="modal" id="info" hidden>
+  <div class="card" role="dialog" aria-labelledby="ih">
+    <h3 id="ih">HydroTM</h3>
+    <p><b>Instrument informativ.</b> Verificați starea și poziția hidrantului la fața locului.</p>
+    <p class="demo" id="infoDemo" hidden>Acest preview conține hidranți fictivi, generați pentru testarea interfeței.</p>
+    <button class="ok" id="infoOk">Am înțeles</button>
+  </div>
+</div>
+
+<div class="modal" id="pinBox" hidden>
+  <div class="card" role="dialog" aria-labelledby="pinH">
+    <h3 id="pinH">Administrare</h3>
+    <p id="pinTxt">Introdu PIN-ul.</p>
+    <input class="pin" id="pinIn" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="PIN din 4 cifre">
+    <div class="pinmsg" id="pinMsg" role="alert"></div>
+    <button class="ghost" id="pinNo">Renunță</button>
+  </div>
+</div>
+
+<!--FALLBACK-->
+<script>/*ML_JS*/</script>
+<script>/*SC_JS*/</script>
+<script>
+{
+const VER='/*VER*/';
+// ---------- raportare erori ----------
+const errBox=m=>{const st=document.getElementById('stamp');if(!st||(st.dataset.e||'').includes(m))return;st.dataset.e=(st.dataset.e||'')+m;st.insertAdjacentHTML('beforeend','<br><b style="color:var(--bad)">Eroare: '+String(m).replace(/[&<>"']/g,'').slice(0,160)+'</b>');};
+window.addEventListener('error',e=>errBox(e.message||'eroare script'));
+window.addEventListener('unhandledrejection',e=>errBox((e.reason&&e.reason.message)||'eroare'));
+// ---------- utilitare ----------
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[.,]/g,' ').replace(/\s+/g,' ').trim();
+const fmtDate=iso=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||'');return m?`${m[3]}.${m[2]}.${m[1]}`:'—';};
+// SHA-256 (pentru PIN; funcționează și fără https)
+function sha256(s){s=unescape(encodeURIComponent(s));const rr=(v,a)=>(v>>>a)|(v<<(32-a));const mw=2**32;let i,j,res='';const words=[],abl=s.length*8,hash=[],k=[];let pc=0;const isC={};for(let c=2;pc<64;c++){if(!isC[c]){for(i=0;i<313;i+=c)isC[i]=c;hash[pc]=(c**.5*mw)|0;k[pc++]=(c**(1/3)*mw)|0;}}s+='\x80';while(s.length%64-56)s+='\x00';for(i=0;i<s.length;i++){j=s.charCodeAt(i);words[i>>2]|=j<<((3-i)%4)*8;}words[words.length]=(abl/mw)|0;words[words.length]=abl;let H8=hash.slice(0,8);for(j=0;j<words.length;){const w=words.slice(j,j+=16),oh=H8;let h=H8.slice(0,8);for(i=0;i<64;i++){const w15=w[i-15],w2=w[i-2],a=h[0],e=h[4];const t1=h[7]+(rr(e,6)^rr(e,11)^rr(e,25))+((e&h[5])^((~e)&h[6]))+k[i]+(w[i]=(i<16)?w[i]:(w[i-16]+(rr(w15,7)^rr(w15,18)^(w15>>>3))+w[i-7]+(rr(w2,17)^rr(w2,19)^(w2>>>10)))|0);const t2=(rr(a,2)^rr(a,13)^rr(a,22))+((a&h[1])^(a&h[2])^(h[1]&h[2]));h=[(t1+t2)|0].concat(h);h[4]=(h[4]+t1)|0;}for(i=0;i<8;i++)h[i]=(h[i]+oh[i])|0;H8=h.slice(0,8);}for(i=0;i<8;i++)for(j=3;j+1;j--){const b=(H8[i]>>(j*8))&255;res+=(b<16?'0':'')+b.toString(16);}return res;}
+const pinHash=p=>sha256('HydroTM|'+p);
+
+// ---------- tipuri de surse ----------
+const TIPURI={
+ 'h-sub':{l:'Hidrant subteran',h:1},'h-sup':{l:'Hidrant suprateran',h:1},'h':{l:'Hidrant',h:1},
+ 'nat':{l:'Sursă naturală (lac/râu/canal)',h:0},'rez':{l:'Rezervor / bazin',h:0},'put':{l:'Puț / fântână',h:0}
+};
+const isH=s=>!!(TIPURI[s.tip]||TIPURI.h).h;
+const tipL=s=>(TIPURI[s.tip]||TIPURI.h).l;
+const GLY={
+ h:'<svg viewBox="0 0 24 24"><path d="M9 3h6v2h1v3h2v3h-2v8h1v2H7v-2h1v-8H6V8h2V5h1z"/></svg>',
+ nat:'<svg viewBox="0 0 24 24"><path d="M2 8.5c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2v3c-2.5 0-2.5-2-5-2s-2.5 2-5 2-2.5-2-5-2-2.5 2-5 2zm0 7c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2v3c-2.5 0-2.5-2-5-2s-2.5 2-5 2-2.5-2-5-2-2.5 2-5 2z"/></svg>',
+ rez:'<svg viewBox="0 0 24 24"><path d="M4 6.5C4 4.6 7.6 3 12 3s8 1.6 8 3.5v11c0 1.9-3.6 3.5-8 3.5s-8-1.6-8-3.5zm2 3.2V12c1.2.9 3.4 1.5 6 1.5s4.8-.6 6-1.5V9.7c-1.5.8-3.6 1.3-6 1.3s-4.5-.5-6-1.3z"/></svg>',
+ put:'<svg viewBox="0 0 24 24"><path d="M12 2 2 8h2v2h16V8h2zM6 11h2v3h8v-3h2v10H6z"/></svg>'
+};
+const glyph=s=>isH(s)?GLY.h:(GLY[s.tip]||GLY.nat);
+
+// ---------- hartă (MapLibre) ----------
+const BOUNDS=[[20.95,45.58],[21.52,45.90]];
+const PROV=[
+ {u:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}'],a:'Tiles © Esri — HERE, Garmin, © OpenStreetMap',max:19},
+ {u:['https://a.tile.opentopomap.org/{z}/{x}/{y}.png','https://b.tile.opentopomap.org/{z}/{x}/{y}.png','https://c.tile.opentopomap.org/{z}/{x}/{y}.png'],a:'© OpenStreetMap, SRTM | © OpenTopoMap (CC-BY-SA)',max:17}
+];
+const dq=matchMedia('(prefers-color-scheme: dark)');
+const rasterPaint=()=>dq.matches
+  ?{'raster-brightness-min':1,'raster-brightness-max':0.12,'raster-saturation':-0.6,'raster-contrast':0.1}
+  :{'raster-brightness-min':0,'raster-brightness-max':1,'raster-saturation':0,'raster-contrast':0};
+const style=p=>({version:8,sources:{base:{type:'raster',tiles:p.u,tileSize:256,maxzoom:p.max,attribution:p.a}},
+  layers:[{id:'bg',type:'background',paint:{'background-color':dq.matches?'#1a1d21':'#e9e6e1'}},{id:'base',type:'raster',source:'base',paint:rasterPaint()}]});
+const map=new maplibregl.Map({container:'map',style:style(PROV[0]),center:[21.2257,45.7537],zoom:12,minZoom:9.5,maxZoom:19,
+  maxBounds:BOUNDS,dragRotate:false,pitchWithRotate:false,touchPitch:false,attributionControl:{compact:true}});
+map.touchZoomRotate.disableRotation();map.keyboard.disableRotation();
+map.addControl(new maplibregl.NavigationControl({showCompass:false}),'bottom-right');
+let pi=0,tOk=0,tBad=0;
+map.on('data',e=>{if(e.sourceId==='base'&&e.tile&&e.dataType==='source')tOk++;});
+map.on('error',e=>{
+  if(e.sourceId!=='base'&&e.error&&!String(e.error.message||'').match(/tile|Failed to fetch|NetworkError|load/i))errBox(e.error.message);
+  if(e.sourceId!=='base'&&!(e.error&&String(e.error.message||'').includes('tile')))return;
+  tBad++;
+  if(!tOk&&tBad>=4){
+    if(pi<PROV.length-1){pi++;tBad=0;const src=map.getSource('base');src&&src.setTiles(PROV[pi].u);}
+    else if(!window._mapFail){window._mapFail=1;document.getElementById('stamp').insertAdjacentHTML('beforeend',' · <b style="color:var(--bad)">harta nu s-a putut încărca</b>');}
+  }
+});
+dq.addEventListener&&dq.addEventListener('change',()=>{
+  const p=rasterPaint();for(const k in p)map.setPaintProperty('base',k,p[k]);
+  map.setPaintProperty('bg','background-color',dq.matches?'#1a1d21':'#e9e6e1');
+});
+
+const COL={functional:'var(--ok)',defect:'var(--bad)',neverificat:'var(--unk)'};
+const LBL={functional:'Funcțional',defect:'Defect',neverificat:'Neverificat'};
+const A={map,esc,norm,fmtDate,errBox,TIPURI,isH,tipL,COL,LBL,BOUNDS,pinHash,pick:null,sheetLock:false,onSheet:null,admin:false};
+window.HydroTM=A;
+
+// ---------- date ----------
+let DATA={config:{},surse:[]},S=[],BYID=new Map(),H_IDX=[];
+const SC=new Supercluster({radius:60,maxZoom:15,minPoints:2});
+const live=new Map();let selected=null;
+function setData(d){
+  DATA=d;S=(d.surse||[]).filter(s=>isFinite(s.lat)&&isFinite(s.lng));
+  BYID=new Map(S.map(s=>[s.id,s]));
+  H_IDX=S.map(h=>({h,k:norm(h.id+' '+h.adresa+' '+h.localitate)}));
+  SC.load(S.map(h=>({type:'Feature',properties:{id:h.id},geometry:{type:'Point',coordinates:[h.lng,h.lat]}})));
+  for(const m of live.values())m.remove();live.clear();
+  if(selected)selected=BYID.get(selected.id)||null;
+  syncMarkers();stampUpd();
+}
+function stampUpd(){
+  const st=document.getElementById('stamp');
+  st.innerHTML=`Date actualizate la: <b>${fmtDate(DATA.actualizat)}</b>`+(DATA.demo?' · <span class="demo">date fictive (preview)</span>':'')+(A.admin?' · <b style="color:var(--red)">copie de lucru (admin)</b>':'');
+}
+A.setData=setData;A.getData=()=>DATA;A.byId=id=>BYID.get(id);
+async function loadData(){
+  try{const r=await fetch('hidranti.json?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw new Error(r.status);return await r.json();}
+  catch(e){const fb=document.getElementById('fallback');if(fb)return JSON.parse(fb.textContent);throw new Error('Nu s-au putut încărca datele hidranților');}
+}
+
+// pinii și bulele sunt elemente HTML
+function pinEl(h){
+  const el=document.createElement('div');
+  el.className='hp'+(isH(h)?'':' sq')+(selected&&selected.id===h.id?' sel':'');el.setAttribute('role','button');el.setAttribute('aria-label',(isH(h)?'Hidrant ':'Sursă de apă ')+h.id);
+  el.innerHTML=`<div class="c" style="background:${COL[h.stare]||COL.neverificat}">${glyph(h)}</div>${h.aprox?'<span class="q">?</span>':''}<span class="hl">${esc(h.id)}${h.aprox?' ?':''}</span>`;
+  el.addEventListener('click',e=>{e.stopPropagation();if(A.sheetLock)return;openSheet(h);});
+  return el;
+}
+function clusterEl(f){
+  const el=document.createElement('div');el.className='cl';el.style.width=el.style.height='46px';
+  el.innerHTML=`<div>${esc(f.properties.point_count)}</div>`;
+  el.addEventListener('click',e=>{e.stopPropagation();
+    const z=SC.getClusterExpansionZoom(f.properties.cluster_id);
+    map.easeTo({center:f.geometry.coordinates,zoom:Math.min(z+.3,17)});});
+  return el;
+}
+function syncMarkers(){
+  if(!S.length&&!live.size)return;
+  const bb=map.getBounds();
+  const want=new Map();
+  for(const f of SC.getClusters([bb.getWest()-.01,bb.getSouth()-.01,bb.getEast()+.01,bb.getNorth()+.01],Math.floor(map.getZoom()))){
+    const k=f.properties.cluster?'c'+f.properties.cluster_id:f.properties.id;
+    want.set(k,f);
+  }
+  for(const [k,m] of live)if(!want.has(k)){m.remove();live.delete(k);}
+  for(const [k,f] of want){
+    if(live.has(k))continue;
+    const el=f.properties.cluster?clusterEl(f):pinEl(BYID.get(f.properties.id));
+    live.set(k,new maplibregl.Marker({element:el}).setLngLat(f.geometry.coordinates).addTo(map));
+  }
+}
+function refreshPin(h){const m=live.get(h.id);if(m){m.getElement().classList.toggle('sel',!!(selected&&selected.id===h.id));}}
+map.on('moveend',syncMarkers);map.on('zoomend',syncMarkers);
+let syncT=0;map.on('move',()=>{const t=Date.now();if(t-syncT>250){syncT=t;syncMarkers();}});
+const upd=()=>document.getElementById('map').classList.toggle('showlabels',map.getZoom()>=16);
+map.on('zoomend',upd);upd();
+
+// ---------- fișa ----------
+const sheet=document.getElementById("sheet");A.sheet=sheet;
+function photoBox(h){
+  const p=h.poze||[];
+  if(!p.length)return '<div class="obs" style="color:var(--muted)">Fără poză</div>';
+  if(DATA.demo)return `<div class="photo" aria-label="Poză exemplu"><svg viewBox="0 0 400 300"><rect width="400" height="300" fill="#9aa3ab"/><rect y="190" width="400" height="110" fill="#6f777e"/><rect x="0" y="200" width="400" height="8" fill="#c9ced2"/><g transform="translate(170 85)"><rect x="12" y="0" width="36" height="14" rx="4" fill="#c4161c"/><rect x="6" y="14" width="48" height="12" fill="#a51217"/><rect x="14" y="26" width="32" height="90" fill="#c4161c"/><rect x="-6" y="44" width="20" height="18" rx="3" fill="#a51217"/><rect x="46" y="44" width="20" height="18" rx="3" fill="#a51217"/><rect x="6" y="114" width="48" height="10" fill="#7d0e12"/></g><text x="200" y="285" text-anchor="middle" font-size="15" fill="#fff" font-family="system-ui">Poză exemplu</text></svg></div>`;
+  return p.map(f=>`<div class="photo"><img src="poze/${encodeURIComponent(f)}" alt="Poză ${esc(h.id)}" loading="lazy" onerror="this.parentNode.textContent='Poza nu e disponibilă'"></div>`).join('');
+}
+function openSheet(h){
+  const prev=selected;selected=h;if(prev)refreshPin(prev);refreshPin(h);
+  const ll=h.lat.toFixed(6)+','+h.lng.toFixed(6);
+  const H=isH(h);
+  const rows=H?`<dt>Tip</dt><dd>${esc(tipL(h))}</dd><dt>Racord</dt><dd>${esc(h.racord||'—')}</dd>`
+              :`<dt>Tip</dt><dd>${esc(tipL(h))}</dd><dt>Acces autospecială</dt><dd>${h.acces===true?'Da':h.acces===false?'Nu':'—'}</dd>`;
+  sheet.innerHTML=`<div class="grab"></div>
+  <div class="sh-head"><div><h2>${esc(h.id)}${h.aprox?'<span class="qbig" title="Locație aproximativă">?</span>':''}</h2>
+  <p class="addr">${esc(h.adresa||'Fără adresă')}, ${esc(h.localitate)}</p></div>
+  <button class="x" id="close" aria-label="Închide">×</button></div>
+  <span class="badge" style="background:${COL[h.stare]||COL.neverificat}">${LBL[h.stare]||LBL.neverificat}</span>
+  <div class="nav">
+   <a class="gm" href="https://www.google.com/maps/search/?api=1&query=${ll}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>Google Maps</a>
+   <a class="wz" href="https://waze.com/ul?ll=${ll}&navigate=yes" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="#06283d"><path d="M12 3C7 3 3 6.6 3 11c0 2 .8 3.8 2.2 5.2-.1.9-.6 1.8-1.4 2.4 1.6.3 3-.2 4-1 1.3.5 2.7.8 4.2.8 5 0 9-3.6 9-8S17 3 12 3zM9 10a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm6 0a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm-3 4.5c-1.6 0-3-.9-3.4-2h1.3c.4.6 1.2 1 2.1 1s1.7-.4 2.1-1h1.3c-.4 1.1-1.8 2-3.4 2z"/></svg>Waze</a>
+  </div>
+  ${h.aprox?`<div class="warn"><b>? Locație aproximativă.</b> ${H?'Hidrantul':'Sursa'} se află în zonă, dar nu exact la pin.</div>`:''}
+  <dl>${rows}<dt>Coordonate</dt><dd>${esc(h.lat.toFixed(5))}, ${esc(h.lng.toFixed(5))}</dd></dl>
+  ${h.obs?`<div class="obs"><b>Observații</b>${esc(h.obs)}</div>`:''}
+  ${photoBox(h)}
+`;
+  sheet.classList.add('open');
+  document.getElementById('close').onclick=closeSheet;
+  if(A.onSheet)A.onSheet(h,sheet);
+  if(innerWidth<760){const p=map.project([h.lng,h.lat]);const ty=Math.max(200,innerHeight*0.2);map.panBy([p.x-innerWidth/2,p.y-ty]);}
+}
+function closeSheet(){sheet.classList.remove('open');A.sheetLock=false;if(selected){const p=selected;selected=null;refreshPin(p);}}
+A.openSheet=openSheet;A.closeSheet=closeSheet;
+map.on('click',e=>{if(A.pick){A.pick(e.lngLat);return;}if(A.sheetLock)return;closeSheet();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(A.onEsc&&A.onEsc())return;closeSheet();hideRes();}});
+
+// ---------- căutare ----------
+const q=document.getElementById('q'),res=document.getElementById('res'),clr=document.getElementById('clr');
+const hideRes=()=>{res.style.display='none'};
+let STR_IDX=[];
+let hlMk=null;
+let hlPt=null;
+function sizeHl(){if(!hlMk||!hlPt)return;const mpp=40075016.686*Math.cos(hlPt[1]*Math.PI/180)/(512*2**map.getZoom());const d=Math.round(2*180/mpp);const r=hlMk.getElement().querySelector('.hlring');r.style.width=r.style.height=d+'px';}
+map.on('zoom',sizeHl);
+function clearHl(){if(hlMk){hlMk.remove();hlMk=null;}hlPt=null;}
+function showHl(st){
+  clearHl();
+  hlPt=[st.lng,st.lat];
+  const el=document.createElement('div');el.className='hlwrap';
+  el.innerHTML=`<div class="hlring"></div><div class="stl">${esc(st.n)}</div><div class="hlpulse"></div>`;
+  hlMk=new maplibregl.Marker({element:el,anchor:'bottom',offset:[0,11]}).setLngLat(hlPt).addTo(map);sizeHl();
+}
+function search(){
+  const t=norm(q.value);clr.style.display=q.value?'block':'none';
+  if(t.length<2){hideRes();return;}
+  const words=t.split(' ');
+  const hit=k=>words.every(w=>k.includes(w));
+  const st=STR_IDX.filter(s=>hit(s.k)).slice(0,6);
+  const hy=H_IDX.filter(x=>hit(x.k)).slice(0,6).map(x=>x.h);
+  if(!st.length&&!hy.length){res.innerHTML='<div class="empty">Niciun rezultat. Încearcă doar o parte din nume, de ex. „lipovei”.</div>';res.style.display='block';return;}
+  res.innerHTML=st.map(s=>`<button data-s="${STR_IDX.indexOf(s)}"><span class="ri"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg></span><span>${esc(s.n)}<small>${esc(s.l)} · stradă</small></span></button>`).join('')+
+    hy.map(h=>`<button data-h="${esc(h.id)}"><span class="ri${isH(h)?'':' s'}" style="background:${COL[h.stare]||COL.neverificat};color:#fff">${isH(h)?'H':'S'}</span><span>${esc(h.id)}${h.aprox?' ?':''}<small>${esc(h.adresa)}, ${esc(h.localitate)}${isH(h)?'':' · '+esc(tipL(h))}</small></span></button>`).join('');
+  res.style.display='block';
+}
+q.addEventListener('input',search);q.addEventListener('focus',search);
+q.addEventListener('keydown',e=>{if(e.key==='Enter'){const b=res.querySelector('button');b&&b.click();}});
+clr.onclick=()=>{q.value='';clearHl();search();q.focus();};
+res.addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.s){const s=STR_IDX[+b.dataset.s];closeSheet();showHl(s);map.flyTo({center:[s.lng,s.lat],zoom:15,duration:700});q.value=s.n;}
+  else{clearHl();const h=BYID.get(b.dataset.h);map.flyTo({center:[h.lng,h.lat],zoom:17,duration:700});map.once('moveend',()=>openSheet(h));q.value=h.id;}
+  hideRes();q.blur();clr.style.display='block';
+});
+map.on('dragstart',hideRes);
+
+// ---------- intrare admin: apăsare 6 s pe logo + PIN ----------
+const logo=document.querySelector('.logo');let lpT=null,lpX=0,lpY=0;
+const lpStop=()=>{clearTimeout(lpT);lpT=null;logo.classList.remove('hold');};
+logo.addEventListener('pointerdown',e=>{lpX=e.clientX;lpY=e.clientY;lpStop();logo.classList.add('hold');lpT=setTimeout(()=>{lpStop();if(!A.admin)askPin();},6000);});
+['pointerup','pointercancel','pointerleave'].forEach(ev=>logo.addEventListener(ev,lpStop));
+logo.addEventListener('pointermove',e=>{if(lpT&&Math.hypot(e.clientX-lpX,e.clientY-lpY)>12)lpStop();});
+logo.addEventListener('contextmenu',e=>e.preventDefault());
+const LS={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}}};
+A.LS=LS;
+const pinBox=document.getElementById('pinBox'),pinIn=document.getElementById('pinIn'),pinMsg=document.getElementById('pinMsg'),pinTxt=document.getElementById('pinTxt');
+let pinMode='enter',pinFirst='',pinFails=0,pinLockUntil=0;
+// PIN valid: cel publicat; cel schimbat din admin și încă nepublicat; sau cel local, doar dacă nu există unul publicat
+const pinOk=h=>{const pub=(PUB.config||{}).pinHash;return h===pub||h===LS.get('hydrotm-pin-pending')||(!pub&&h===LS.get('hydrotm-pin-local'));};
+const hasPin=()=>!!((PUB.config||{}).pinHash||LS.get('hydrotm-pin-pending')||LS.get('hydrotm-pin-local'));
+function askPin(){
+  pinMode=hasPin()?'enter':'set1';pinFirst='';pinMsg.textContent='';pinIn.value='';
+  pinTxt.textContent=pinMode==='enter'?'Introdu PIN-ul de administrare.':'Nu există încă un PIN. Alege un PIN din 4 cifre.';
+  pinBox.hidden=false;setTimeout(()=>pinIn.focus(),50);
+}
+const pinErr=m=>{pinMsg.textContent=m;pinIn.value='';const c=pinBox.querySelector('.card');c.classList.remove('shake');void c.offsetWidth;c.classList.add('shake');};
+pinIn.addEventListener('input',()=>{
+  pinIn.value=pinIn.value.replace(/\D/g,'').slice(0,4);
+  if(pinIn.value.length<4)return;
+  const v=pinIn.value;
+  if(pinMode==='enter'){
+    if(Date.now()<pinLockUntil){pinErr('Prea multe încercări. Așteaptă puțin.');return;}
+    if(pinOk(pinHash(v))){pinFails=0;pinBox.hidden=true;startAdmin();}
+    else{pinFails++;if(pinFails>=5){pinLockUntil=Date.now()+30000;pinFails=0;pinErr('PIN greșit. Încearcă din nou peste 30 de secunde.');}else pinErr('PIN greșit.');}
+  }else if(pinMode==='set1'){pinFirst=v;pinMode='set2';pinIn.value='';pinMsg.textContent='';pinTxt.textContent='Introdu din nou același PIN, pentru confirmare.';}
+  else{
+    if(v!==pinFirst){pinMode='set1';pinErr('PIN-urile nu coincid. Alege din nou.');pinTxt.textContent='Alege un PIN din 4 cifre.';return;}
+    LS.set('hydrotm-pin-local',pinHash(v));LS.set('hydrotm-pin-pending',pinHash(v));pinBox.hidden=true;startAdmin();
+  }
+});
+document.getElementById('pinNo').onclick=()=>{pinBox.hidden=true;};
+function startAdmin(){
+  try{sessionStorage.setItem('hydrotm-admin','1')}catch(e){}
+  if(window.HydroAdmin){window.HydroAdmin.start();return;}
+  const s=document.createElement('script');s.src='admin.js?v='+VER;
+  s.onload=()=>window.HydroAdmin&&window.HydroAdmin.start();
+  s.onerror=()=>errBox('Nu s-a putut încărca modulul de administrare (admin.js)');
+  document.head.appendChild(s);
+}
+
+// ---------- pornire ----------
+let PUB={config:{}};
+A.published=()=>PUB;
+loadData().then(d=>{
+  PUB=d;STR_IDX=(d.strazi||[]).map(([n,l,lat,lng])=>({n,l,lat,lng,k:norm(n+' '+l)}));
+  setData(JSON.parse(JSON.stringify(d)));
+  document.getElementById('infoDemo').hidden=!d.demo;
+  let adm=false;try{adm=sessionStorage.getItem('hydrotm-admin')==='1'}catch(e){}
+  if(adm)startAdmin();
+}).catch(e=>{document.getElementById('stamp').innerHTML='<b style="color:var(--bad)">'+esc(e.message)+'</b>';});
+
+// ---------- mesaj de informare (o singură dată) ----------
+const info=document.getElementById('info');
+if(LS.get('hydrotm-info')!=='1')info.hidden=false;
+document.getElementById('infoOk').onclick=()=>{info.hidden=true;LS.set('hydrotm-info','1');};
+}
+</script>
+</body>
+</html>
